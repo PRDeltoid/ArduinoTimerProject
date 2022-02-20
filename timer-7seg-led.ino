@@ -1,33 +1,27 @@
 #include <arduino-timer.h>
 #include <Adafruit_GFX.h>
 #include <AceButton.h>
-
-#include <LowPower.h>
 #include <Adafruit_LEDBackpack.h>
-#include <pitches.h>
+#include "pitches.h"
 
 using namespace ace_button;
 
-void handleStopButton(AceButton* /*button*/, uint8_t eventType, uint8_t /*buttonState*/);
-void handleAddTimeButton(AceButton* /*button*/, uint8_t eventType, uint8_t /*buttonState*/);
-void handleTimer1Button(AceButton* /*button*/, uint8_t eventType, uint8_t /*buttonState*/);
-void handleTimer2Button(AceButton* /*button*/, uint8_t eventType, uint8_t /*buttonState*/);
-void handleTimer3Button(AceButton* /*button*/, uint8_t eventType, uint8_t /*buttonState*/);
+////////////
+// SETTINGS
+////////////
 
 // Timer values
-const int ADD_TIME_SECONDS = 30;
-const int TIMER1_SECONDS = 60;
-const int TIMER2_SECONDS = 120;
-const int TIMER3_SECONDS = 3600;
+const int ADD_TIME_SECONDS = 5 * 60; // 5 minutes
+const int TIMER1_SECONDS = 10 * 60; // 10 minutes
+const int TIMER2_SECONDS = 45 * 60; // 45 minutes
 
 // Pin values
-const int ALARM_PIN = 9;
-const int STOP_BUTTON_PIN = 7;
+const int ALARM_PIN = 6;
+const int STOP_BUTTON_PIN = 1;
+const int PAUSE_BUTTON_PIN = 0;
 const int ADD_TIME_BUTTON_PIN = 8; 
-const int START_TIMER1_PIN = 6;
-const int START_TIMER2_PIN = 5;
-const int START_TIMER3_PIN = 4;
-const int WAKEUP_PIN = 10;
+const int START_TIMER1_PIN = 3;
+const int START_TIMER2_PIN = 2;
 
 // Other settings
 const int BRIGHTNESS = 3;   // Valid values: 1-10
@@ -37,7 +31,7 @@ const int ALARM_LENGTH = 5; // 5 second alarm at the end of the timer
 const int ALARM_TONE = NOTE_C5; // TODO: Make a tone tester and find a nice tone for the alarm
 const int ALARM_TONE_LENGTH = 300; // 300 ms chirp 
 
-// Members
+// MEMBERS
 int timer = 0; // The all-mighty timer (value in seconds)
 
 // Tracks the amount of alarm chirps that have been made. 
@@ -48,6 +42,7 @@ bool shouldBlink = false;   // Flag determining if we should blink the display w
 bool isBlinking = false;    // Flag tracking if we are already blinking
 bool makeAlarm = false;     // Flag determining if we should make a tone to indicate the timer is done
 bool timerRunning = false;  // Flag determining if there is currently a timer running
+bool paused = false;        // Flag determining if the timer is set but paused
 
 auto actionTimer = timer_create_default();  // Main "timer" timer
 auto alarmTimer = timer_create_default();   // Timer for the alarm. Shorter period = faster alarm
@@ -55,19 +50,25 @@ auto alarmTimer = timer_create_default();   // Timer for the alarm. Shorter peri
 Adafruit_7segment matrix = Adafruit_7segment(); // 7-seg LED driver
 
 // Button setup
+void handleStopButton(AceButton* /*button*/, uint8_t eventType, uint8_t /*buttonState*/);
+void handlePauseButton(AceButton* /*button*/, uint8_t eventType, uint8_t /*buttonState*/);
+void handleAddTimeButton(AceButton* /*button*/, uint8_t eventType, uint8_t /*buttonState*/);
+void handleTimer1Button(AceButton* /*button*/, uint8_t eventType, uint8_t /*buttonState*/);
+void handleTimer2Button(AceButton* /*button*/, uint8_t eventType, uint8_t /*buttonState*/);
+
 AceButton stopButton(STOP_BUTTON_PIN);
+AceButton pauseButton(PAUSE_BUTTON_PIN);
 AceButton addTimeButton(ADD_TIME_BUTTON_PIN);
 AceButton timer1Button(START_TIMER1_PIN);
 AceButton timer2Button(START_TIMER2_PIN);
-AceButton timer3Button(START_TIMER3_PIN);
 
 void setup() {
   // Pin setup
   pinMode(STOP_BUTTON_PIN, INPUT_PULLUP);
+  pinMode(PAUSE_BUTTON_PIN, INPUT_PULLUP);
   pinMode(ADD_TIME_BUTTON_PIN, INPUT_PULLUP);
   pinMode(START_TIMER1_PIN, INPUT_PULLUP);  
   pinMode(START_TIMER2_PIN, INPUT_PULLUP);
-  pinMode(START_TIMER3_PIN, INPUT_PULLUP);
 
   // Button event handler binding
   ButtonConfig* config = ButtonConfig::getSystemButtonConfig();
@@ -85,12 +86,12 @@ void setup() {
 
 void loop() {
   // Check if any buttons were pressed
-  stopButton.check();
+  stopButton.check();  
+  pauseButton.check();
   addTimeButton.check();
   timer1Button.check();
   timer2Button.check();
-  timer3Button.check();
-
+  
   // Tick timers
   actionTimer.tick();
   alarmTimer.tick();
@@ -102,56 +103,65 @@ void buttonHandler(AceButton* button, uint8_t eventType, uint8_t buttonState) {
   switch (button->getPin()) {
     case STOP_BUTTON_PIN:
       Serial.println("Stop button pressed");
-      timer = 0;
-      timerRunning = false;
-      stop_blink();
-      write_blank();
+      stop_timer();
+      break;
+     case PAUSE_BUTTON_PIN:
+      Serial.println("Pause button pressed");
+      pause_or_play();
       break;
      case ADD_TIME_BUTTON_PIN:
       Serial.println("Add Time button pressed");
-      timer += ADD_TIME_SECONDS;
-      if(timerRunning == false) {
-        timerRunning = true;
-      }
-      write_timer();
+      add_time(ADD_TIME_SECONDS);
       break;
      case START_TIMER1_PIN:
       Serial.println("Timer 1 button pressed");
-      // Add time to to timer
-      timer = TIMER1_SECONDS;
-      // If the timer was stopped, start it again
-      if(timerRunning == false) {
-        timerRunning = true;
-      }
-      write_timer();
+      start_timer(TIMER1_SECONDS);
       break;
      case START_TIMER2_PIN:
       Serial.println("Timer 2 button pressed");
-      // Add time to to timer
-      timer = TIMER2_SECONDS;
-      // If the timer was stopped, start it again
-      if(timerRunning == false) {
-        timerRunning = true;
-      }
-      write_timer();
+      start_timer(TIMER2_SECONDS);
       break;
-     case START_TIMER3_PIN:
-      Serial.println("Timer 3 button pressed");
-      // Add time to to timer
-      timer = TIMER3_SECONDS;
-      // If the timer was stopped, start it again
-      if(timerRunning == false) {
-        timerRunning = true;
-      }
-      write_timer();
-      break;
+  }
+}
+
+void add_time(int timeSeconds) {
+  timer += timeSeconds;
+  if(timerRunning == false) {
+    timerRunning = true;
+    matrix.drawColon(true);
+  }
+}
+
+void start_timer(int timerSeconds) {
+  // Add time to the timer
+  timer = timerSeconds;
+  // If the timer was stopped, start it again
+  if(timerRunning == false) {
+    timerRunning = true;
+    matrix.drawColon(true);
+  }
+}
+
+void stop_timer() {
+  timer = 0;
+  timerRunning = false;
+  stop_blink();
+  write_blank();
+}
+
+void pause_or_play() {
+  paused = !paused;
+  if(paused) {
+    start_blink();
+  } else {
+    stop_blink();
   }
 }
 
 // Do some checks, subtract 1 second from our timer, and then display it
 bool dec_timer(void *) {
   // Exit early if the alarm is not running (paused or done)
-  if(timerRunning == false) return true;
+  if(timerRunning == false || paused) return true;
   if(timer == 0) {
     // Exit early if timer has finished
     // and stop blinking
@@ -172,7 +182,6 @@ bool dec_timer(void *) {
   return true;
 }
 
-
 /////
 // ALARM HELPERS
 ////
@@ -189,6 +198,7 @@ bool make_tone(void *) {
   if(alarmLength == 0) {
     makeAlarm = false;
   }
+  
   // If we get here, make a noise
   tone(ALARM_PIN, ALARM_TONE, ALARM_TONE_LENGTH);
   // Repeat forvever
@@ -224,7 +234,7 @@ void stop_blink() {
 // 7-SEG LED SCREEN HELPERS
 ////
 
-// Convert the current timer value (in seconds) into a clock display "MM:SS" and writes it to the display
+// Convert the current timer value (in seconds) into a clock display
 void write_timer() {
   // If the timer is too high to draw as MM:SS, draw as HH:MM instead
   if(timer > 3600) {    
@@ -234,6 +244,7 @@ void write_timer() {
   }
 }
 
+// Writes minutes/seconds as MM:SS
 void write_minutes_seconds(int seconds) {
   int minutes = 0;
   
@@ -273,7 +284,6 @@ void write_hour_minutes2(int seconds) {
   }
   
   matrix.drawColon(false);
-  // Should read "1.5hr"
   int hours = seconds / (60 * 60);
   int minutes = seconds / (60) % 60;
   matrix.writeDigitNum(0, hours % 10, true); // H.
