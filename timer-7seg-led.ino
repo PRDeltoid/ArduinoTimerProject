@@ -92,11 +92,15 @@ class TonePlayer {
 const Note notes[] = {
   { NOTE_C7, 200, 220 },
   { NOTE_C7, 200, 220 },
+  { NOTE_C7, 200, 220 },
   { NOTE_C7, 200, 300 },
+  { NOTE_C7, 200, 220 },
   { NOTE_C7, 200, 220 },
   { NOTE_C7, 200, 220 },
   { NOTE_C7, 200, 0 },
 };
+
+const int numNotes = 8;
  
 // Timer values
 const int ADD_TIME_SECONDS = 5 * 60;  // 5 minutes
@@ -117,6 +121,7 @@ const int BRIGHTNESS = 3;       // Valid values: 1-10
 const int BLINK_RATE = 1;       // Valid values: 0-3
 const int BLINK_TIME = 30;      // The amount of seconds left in the timer when the display should begin blinking
 const bool SHOULD_BLINK = false;// Flag determining if we should blink the display when the timer reaches blinkTime seconds left
+const bool SHOULD_BLINK_WHEN_DONE = false; // Flag determinig if the display should blink when the timer reaches 0 seconds left
 
 // MEMBERS
 volatile int timer = 0;                // The all-mighty timer (value in seconds) 
@@ -129,7 +134,7 @@ bool screenDisabled = false;
 
 auto actionTimer = timer_create_default();      // Main "timer" timer
 Adafruit_7segment matrix = Adafruit_7segment(); // 7-seg LED driver
-TonePlayer tonePlayer(notes, 6, ALARM_PIN);            // Passive buzzer tone player
+TonePlayer tonePlayer(notes, numNotes, ALARM_PIN);            // Passive buzzer tone player
 
 AceButton stopButton(STOP_BUTTON_PIN);
 AceButton pauseButton(PAUSE_BUTTON_PIN);
@@ -193,7 +198,7 @@ void setup() {
   // Spin two times to indicate to the user that setup is complete 
   // and the device is available for use
   delay(100);
-  write_spin(2);
+  write_spin(2, 150);
 
   DEBUG_PRINTLN("Setup finished");
 }
@@ -341,9 +346,13 @@ bool dec_timer(void *) {
     if(timer == 0) {
       // Exit early if timer has finished
       tonePlayer.activate();
-      start_blink();
-      //stop_blink();
-      //write_blank();
+      if(SHOULD_BLINK_WHEN_DONE) {
+        start_blink();
+      } else {
+        stop_blink();
+        write_blank();
+      }
+
       timerRunning = false;
       return true;
     }
@@ -477,8 +486,7 @@ void write_blank() {
   matrix.writeDisplay();   
 }
 
-void write_spin(int numSpins) {
-  const int speed = 150;
+void write_spin(const int numSpins, const int speed) {
   matrix.drawColon(false);
 
   for(int i = 0; i < numSpins; i++) {
@@ -527,7 +535,7 @@ void write_spin(int numSpins) {
     matrix.writeDigitRaw(0, B00100000);
     matrix.writeDisplay();
     delay(speed);
-    matrix.writeDigitRaw(0, 0);
-    matrix.writeDisplay();
   }
+  matrix.writeDigitRaw(0, 0);
+  matrix.writeDisplay();
 }
