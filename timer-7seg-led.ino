@@ -134,7 +134,7 @@ volatile bool timerRunning = false;    // Flag determining if there is currently
 volatile bool stopwatchRunning = false;// Flag determining if there is a stopwatch running
 bool paused = false;          // Flag determining if the timer is set but paused
 int prevTicks = 1000;         // Tick tracker for the tone player to piggy back on actionTimer's ticks
-bool screenDisabled = false;
+bool screenEnabled = true;
 
 auto actionTimer = timer_create_default();      // Main "timer" timer
 Adafruit_7segment matrix = Adafruit_7segment(); // 7-seg LED driver
@@ -167,8 +167,10 @@ void setup() {
   pinMode(START_TIMER2_PIN, INPUT_PULLUP);
 
   // Attach a wakeup interrupt on all function pins
-  DEBUG_PRINTLN("Setting up interrupts");  
-  screenDisabled = true;
+  DEBUG_PRINTLN("Setting up interrupts");
+  // Disable the screen because attaching interrupts runs the 
+  // callback immediately which can render weird artifacts on the screen
+  screenEnabled = false;
   LowPower.attachInterruptWakeup(PAUSE_BUTTON_PIN, pauseButtonAction, CHANGE);
   LowPower.attachInterruptWakeup(ADD_TIME_BUTTON_PIN, addTimeButtonAction, CHANGE);
   LowPower.attachInterruptWakeup(START_TIMER1_PIN, startTimerOneButtonAction, CHANGE);
@@ -179,7 +181,7 @@ void setup() {
   // its interrupt function for all attach calls after the first
   stop_timer();
 
-  screenDisabled = false;
+  screenEnabled = true;
 
   // Button event handler binding
   DEBUG_PRINTLN("Setting up buttons");  
@@ -203,6 +205,8 @@ void setup() {
   // Spin two times to indicate to the user that setup is complete 
   // and the device is available for use
   delay(100);
+  // 1 rotation (in ms) = speed * 14 * numSpins
+  // 150 * 14 * 2 = 4200 (4.2 sec)
   write_spin(2, 150);
 
   DEBUG_PRINTLN("Setup finished");
@@ -403,7 +407,7 @@ void stop_blink() {
 
 // Convert the current timer value (in seconds) into a clock display
 void write_timer() {
-  if(screenDisabled) return;
+  if(screenEnabled == false) return;
   // If the timer is too high to draw as MM:SS, draw as HH:MM instead
   if(timer > 3600) {    
      write_hour_minutes(timer);
@@ -496,6 +500,7 @@ void write_blank() {
 }
 
 void write_spin(const int numSpins, const int speed) {
+  // 1 rotation (in ms) = speed * 14 * numSpins
   matrix.drawColon(false);
 
   for(int i = 0; i < numSpins; i++) {
