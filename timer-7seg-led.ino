@@ -57,7 +57,13 @@ class TonePlayer {
       
       currPause -= ticks;
       
+      
       if(currPause < 0) {
+        if(currNote >= numNotes) {
+          stop();
+          DEBUG_PRINTLN("Tone Player melody completed");
+          return;
+        }
         DEBUG_PRINT("Playing note #");
         DEBUG_PRINT(currNote);
         DEBUG_PRINT(" note: ");
@@ -66,10 +72,6 @@ class TonePlayer {
 
         currPause = notes[currNote].PauseAfter;
         currNote++;
-
-        if(currNote >= numNotes) {
-          stop();
-        }
       }    
     }
   
@@ -99,10 +101,10 @@ const Note notes[] = {
   { NOTE_C7, 200, 220 },
   { NOTE_C7, 200, 220 },
   { NOTE_C7, 200, 220 },
-  { NOTE_C7, 200, 0 },
+  { NOTE_C7, 200, 500 },
 };
 
-const int numNotes = 8;
+const int numNotes = sizeof(notes)/sizeof(Note);
  
 // Timer values
 const int ADD_TIME_SECONDS = 5 * 60;  // 5 minutes
@@ -299,6 +301,7 @@ void start_timer(int timerSeconds) {
   timer = timerSeconds;
 
   stop_blink();
+  tonePlayer.stop();
 
   // If the timer was stopped, start it again
   if(timerRunning == false) {
