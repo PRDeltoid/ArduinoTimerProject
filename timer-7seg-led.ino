@@ -13,6 +13,8 @@
   #define DEBUG_PRINTF(x,y) Serial.print(x,y)
   #define DEBUG_PRINTLN(x) Serial.println(x)
   #define DEBUG_DELAY(x) delay(x)
+  #define DEBUG_FLUSH() Serial.flush()
+  #define DEBUG_END() Serial.end()
 #else
   #define DEBUG_SERIAL_BEGIN(x)
   #define DEBUG_PRINT(x)
@@ -35,7 +37,7 @@ class TonePlayer {
     int currPause = 0;
     int numNotes = 0;
     int alarmPin;
-    bool isRunning = false;
+    volatile bool isRunning = false;
     const Note* notes;
 
   public:
@@ -212,14 +214,17 @@ void loop() {
   timer2Button.check();
   
   // Tick timers
-  actionTimer.tick();
   int ticks = actionTimer.tick();
   tonePlayer.tick(prevTicks - ticks);
   prevTicks = ticks;
 
   if(timerRunning == false && stopwatchRunning == false && tonePlayer.isPlaying() == false) {
     DEBUG_PRINTLN("Going to sleep");
+    DEBUG_FLUSH();
+    DEBUG_END(); 
     LowPower.sleep();
+    DEBUG_SERIAL_BEGIN(9600);
+    DEBUG_DELAY(1000);
     DEBUG_PRINTLN("Waking up");
   }
 }
