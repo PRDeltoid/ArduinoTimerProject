@@ -125,7 +125,7 @@ const int BRIGHTNESS = 3;       // Valid values: 1-10
 const int BLINK_RATE = 1;       // Valid values: 0-3
 const int BLINK_TIME = 30;      // The amount of seconds left in the timer when the display should begin blinking
 const bool SHOULD_BLINK = false;// Flag determining if we should blink the display when the timer reaches blinkTime seconds left
-const bool SHOULD_BLINK_WHEN_DONE = false; // Flag determinig if the display should blink when the timer reaches 0 seconds left
+const bool SHOULD_BLINK_WHEN_DONE = true; // Flag determinig if the display should blink when the timer reaches 0 seconds left
 
 // MEMBERS
 volatile int timer = 0;                // The all-mighty timer (value in seconds) 
@@ -173,6 +173,7 @@ void setup() {
   LowPower.attachInterruptWakeup(ADD_TIME_BUTTON_PIN, addTimeButtonAction, CHANGE);
   LowPower.attachInterruptWakeup(START_TIMER1_PIN, startTimerOneButtonAction, CHANGE);
   LowPower.attachInterruptWakeup(START_TIMER2_PIN, startTimerTwoButtonAction, CHANGE);
+  LowPower.attachInterruptWakeup(STOP_BUTTON_PIN, stopButtonAction, CHANGE);
     
   // Manually stop timers since attachInterruptWakeup calls 
   // its interrupt function for all attach calls after the first
@@ -544,6 +545,13 @@ void write_spin(const int numSpins, const int speed) {
     matrix.writeDisplay();
     delay(speed);
   }
+  matrix.writeDigitRaw(0, 1);
+  matrix.writeDisplay();
+  delay(speed);
   matrix.writeDigitRaw(0, 0);
+  matrix.writeDigitRaw(1, 1);
+  matrix.writeDisplay();
+  delay(speed);
+  matrix.writeDigitRaw(1, 0);
   matrix.writeDisplay();
 }
