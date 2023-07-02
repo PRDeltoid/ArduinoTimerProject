@@ -7,10 +7,11 @@
 
 #define DEBUG
 
+// Only print serial statements when DEBUG flag is defined
 #ifdef DEBUG
   #define DEBUG_SERIAL_BEGIN(x) Serial.begin(x)
   #define DEBUG_PRINT(x) Serial.print(x)
-  #define DEBUG_PRINTF(x,y) Serial.print(x,y)
+  #define DEBUG_PRINTF(args...) Serial.printf(args)
   #define DEBUG_PRINTLN(x) Serial.println(x)
   #define DEBUG_DELAY(x) delay(x)
   #define DEBUG_FLUSH() Serial.flush()
@@ -18,7 +19,7 @@
 #else
   #define DEBUG_SERIAL_BEGIN(x)
   #define DEBUG_PRINT(x)
-  #define DEBUG_PRINTF(x,y)
+  #define DEBUG_PRINTF(...)
   #define DEBUG_PRINTLN(x)
   #define DEBUG_DELAY(x)
 #endif
@@ -57,17 +58,13 @@ class TonePlayer {
       
       currPause -= ticks;
       
-      
       if(currPause < 0) {
         if(currNote >= numNotes) {
           stop();
           DEBUG_PRINTLN("Tone Player melody completed");
           return;
         }
-        DEBUG_PRINT("Playing note #");
-        DEBUG_PRINT(currNote);
-        DEBUG_PRINT(" note: ");
-        DEBUG_PRINTLN(notes[currNote].Note);
+        DEBUG_PRINTF("Playing note # %d (%d)", currNote, notes[currNote].Note);
         tone(alarmPin, notes[currNote].Note, notes[currNote].Duration);
 
         currPause = notes[currNote].PauseAfter;
@@ -80,9 +77,7 @@ class TonePlayer {
     }
     
     void activate() {
-      DEBUG_PRINT("Playing melody with ");
-      DEBUG_PRINT(numNotes);
-      DEBUG_PRINTLN(" notes");
+      DEBUG_PRINTF("Playing melody with %d notes", numNotes);
       isRunning = true;
       currNote = 0;
     }
@@ -148,7 +143,12 @@ AceButton timer2Button(START_TIMER2_PIN);
 
 void setup() {
   DEBUG_SERIAL_BEGIN(9600);
-  DEBUG_DELAY(5000);
+  // Wait for serial connection if we're in debug mode.
+  // This prevents us from missing any serial information when debugging but will halt the microcontroller
+  // if no USB cable or serial connection is available
+  #ifdef DEBUG
+  while(!Serial) delay(10);
+  #endif
   DEBUG_PRINTLN("Setup started");
 
   DEBUG_PRINTLN("Setting up LED screen");
@@ -300,9 +300,7 @@ void buttonHandler(AceButton* button, uint8_t eventType, uint8_t buttonState) {
 }
 
 void start_timer(int timerSeconds) {
-  DEBUG_PRINT("Starting timer for ");
-  DEBUG_PRINTF(timerSeconds, DEC);
-  DEBUG_PRINTLN(" seconds");
+  DEBUG_PRINTF("Starting timer for %d seconds", timerSeconds);
   timer = timerSeconds;
 
   stop_blink();
