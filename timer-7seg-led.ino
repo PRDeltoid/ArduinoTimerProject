@@ -5,7 +5,7 @@
 #include <Adafruit_LEDBackpack.h>
 #include "pitches.h"
 
-#define DEBUG
+//#define DEBUG
 
 // Only print serial statements when DEBUG flag is defined
 #ifdef DEBUG
@@ -68,7 +68,7 @@ class TonePlayer {
           DEBUG_PRINTLN("Tone Player melody completed");
           return;
         }
-        DEBUG_PRINTF("Playing note # %d (%d)", currNote, notes[currNote].Note);
+        DEBUG_PRINTF("Playing note # %d (%d)\n", currNote, notes[currNote].Note);
         tone(alarmPin, notes[currNote].Note, notes[currNote].Duration);
 
         currPause = notes[currNote].PauseAfter;
@@ -101,13 +101,13 @@ volatile State CurrentState = Idle;
 
 // Alarm notes
 const Note notes[] = {
-  { NOTE_C7, 200, 220 },
-  { NOTE_C7, 200, 220 },
-  { NOTE_C7, 200, 220 },
-  { NOTE_C7, 200, 300 },
-  { NOTE_C7, 200, 220 },
-  { NOTE_C7, 200, 220 },
-  { NOTE_C7, 200, 220 },
+  { NOTE_C7, 200, 240 },
+  { NOTE_C7, 200, 240 },
+  { NOTE_C7, 200, 240 },
+  { NOTE_C7, 200, 320 },
+  { NOTE_C7, 200, 240 },
+  { NOTE_C7, 200, 240 },
+  { NOTE_C7, 200, 240 },
   { NOTE_C7, 200, 500 },
 };
 
@@ -116,8 +116,7 @@ const int numNotes = sizeof(notes)/sizeof(Note);
 // Timer values
 const int ADD_TIME_SECONDS = 5 * 60;  // 5 minutes
 const int TIMER1_SECONDS = 10 * 60;   // 10 minutes
-//const int TIMER2_SECONDS = 45 * 60;   // 45 minutes
-const int TIMER2_SECONDS = 5;
+const int TIMER2_SECONDS = 45 * 60;   // 45 minutes
 
 // Pin values
 const int ALARM_PIN = 6;
@@ -137,9 +136,11 @@ const bool SHOULD_BLINK_WHEN_DONE = true; // Flag determinig if the display shou
 // MEMBERS
 volatile int timer = 0;                // The all-mighty timer (value in seconds) 
 bool isBlinking = false;      // Flag tracking if we are already blinking
-bool paused = false;          // Flag determining if the timer is set but paused
+volatile bool paused = false;          // Flag determining if the timer is set but paused
 int prevTicks = 1000;         // Tick tracker for the tone player to piggy back on actionTimer's ticks
 bool screenEnabled = true;
+
+volatile bool interruptsEnabled = false;
 
 auto actionTimer = timer_create_default();      // Main "timer" timer
 Adafruit_7segment matrix = Adafruit_7segment(); // 7-seg LED driver
@@ -186,11 +187,11 @@ void setup() {
   EIC->INTFLAG.reg |= 1 << START_TIMER1_PIN;
   EIC->INTFLAG.reg |= 1 << START_TIMER2_PIN;
   EIC->INTFLAG.reg |= 1 << STOP_BUTTON_PIN;*/
-  LowPower.attachInterruptWakeup(PAUSE_BUTTON_PIN, pauseButtonAction, CHANGE);
-  LowPower.attachInterruptWakeup(ADD_TIME_BUTTON_PIN, addTimeButtonAction, CHANGE);
-  LowPower.attachInterruptWakeup(START_TIMER1_PIN, startTimerOneButtonAction, CHANGE);
-  LowPower.attachInterruptWakeup(START_TIMER2_PIN, startTimerTwoButtonAction, CHANGE);
-  LowPower.attachInterruptWakeup(STOP_BUTTON_PIN, stopButtonAction, CHANGE);
+  LowPower.attachInterruptWakeup(PAUSE_BUTTON_PIN, pauseInterruptAction, RISING);
+  LowPower.attachInterruptWakeup(ADD_TIME_BUTTON_PIN, addTimeInterruptAction, RISING);
+  LowPower.attachInterruptWakeup(START_TIMER1_PIN, startTimerOneInterruptAction, RISING);
+  LowPower.attachInterruptWakeup(START_TIMER2_PIN, startTimerTwoInterruptAction, RISING);
+  LowPower.attachInterruptWakeup(STOP_BUTTON_PIN, stopInterruptAction, RISING);
     
   // Manually stop timers since attachInterruptWakeup calls 
   // its interrupt function for all attach calls after the first
@@ -219,7 +220,7 @@ void setup() {
 
   // Spin two times to indicate to the user that setup is complete 
   // and the device is available for use
-  //delay(100);
+  delay(100);
   // 1 rotation (in ms) = speed * 14 * numSpins
   // 150 * 14 * 2 = 4200 (4.2 sec)
   write_spin(2, 150);
@@ -234,7 +235,7 @@ void loop() {
   addTimeButton.check();
   timer1Button.check();
   timer2Button.check();
-  
+
   // Tick timers
   int ticks = actionTimer.tick();
   tonePlayer.tick(prevTicks - ticks);
@@ -243,13 +244,15 @@ void loop() {
   switch(CurrentState) {
     case(Idle):
       if(tonePlayer.isPlaying() == false) {
-        /*DEBUG_PRINTLN("Going to sleep");
+        DEBUG_PRINTLN("Going to sleep");
         DEBUG_FLUSH();
-        DEBUG_END(); 
+        DEBUG_END();
+        interruptsEnabled = true;
         LowPower.sleep();
+        interruptsEnabled = false;
         DEBUG_SERIAL_BEGIN(9600);
         DEBUG_WAIT_FOR_SERIAL();
-        DEBUG_PRINTLN("Waking up");*/
+        DEBUG_PRINTLN("Waking up");
       }
       break;
     case(TimerRunning):
@@ -258,6 +261,42 @@ void loop() {
       // Do nothing in every other case
       break;
   }
+}
+
+void stopInterruptAction() {
+  if(interruptsEnabled == false) return;
+
+  DEBUG_PRINTLN("Stop interrupt executing");
+  stop_blink();
+  write_blank();
+}
+
+void pauseInterruptAction() {
+  if(interruptsEnabled == false) return;
+
+  DEBUG_PRINTLN("Pause (stopwatch) interrupt executing");
+  start_stopwatch();
+}
+
+void addTimeInterruptAction() {
+  if(interruptsEnabled == false) return;
+
+  DEBUG_PRINTLN("Add Time interrupt executing");
+  start_timer(ADD_TIME_SECONDS);
+}
+
+void startTimerOneInterruptAction() {
+  if(interruptsEnabled == false) return;
+
+  DEBUG_PRINTLN("Start Timer 1 interrupt executing");
+  start_timer(TIMER1_SECONDS);
+}
+
+void startTimerTwoInterruptAction() {
+  if(interruptsEnabled == false) return;
+
+  DEBUG_PRINTLN("Start Timer 1 interrupt executing");
+  start_timer(TIMER2_SECONDS);
 }
 
 void stopButtonAction() {
@@ -340,7 +379,7 @@ void buttonHandler(AceButton* button, uint8_t eventType, uint8_t buttonState) {
 // Returns true on successful timer start
 // Returns false otherwise
 void start_timer(int timerSeconds) {
-  DEBUG_PRINTF("Starting timer for %d seconds", timerSeconds);
+  DEBUG_PRINTF("Starting timer for %d seconds\n", timerSeconds);
   timer = timerSeconds;
 
   // If a blink or tone was playing, stop it before we start the new timer
@@ -393,17 +432,20 @@ void pause_or_play() {
 
 // Do some checks, subtract 1 second from our timer, and then display it
 bool dec_timer(void *) {
+  DEBUG_PRINTLN("Dec timer: Start");
   // Don't change the timer if it is currently paused
   if(paused) return true;
 
+  //DEBUG_PRINTLN("Dec timer: Checking CurrentState");
   switch(CurrentState) {
     case(Idle):
+      DEBUG_PRINTLN("Dec timer: CurrentState Idle");
       // If idle, bail early as we have nothing to do here
       return true;
     case(TimerRunning):
-      if(timer == 0) {
-        // Exit early if timer has finished
-        CurrentState = Idle;
+      DEBUG_PRINTF("Dec timer: CurrentState TimerRunning (Time Left: %d)\n", timer);
+      if(timer <= 0) {
+        DEBUG_PRINTLN("Timer finished");
         // Play a tone to indicate to the user the timer has finished
         tonePlayer.activate();
 
@@ -414,6 +456,7 @@ bool dec_timer(void *) {
           write_blank();
         }
 
+        CurrentState = Idle;
         return true;
       }
       timer -= 1; // dec timer
@@ -424,11 +467,13 @@ bool dec_timer(void *) {
       }
       break;
     case(StopwatchRunning):
+      DEBUG_PRINTLN("Dec timer: CurrentState StopwatchRunning");
       timer += 1;
       break;    
   }
   
   write_timer();
+  return true;
 }
 
 ////
@@ -436,7 +481,8 @@ bool dec_timer(void *) {
 ////
 
 void start_blink() {
-  if(isBlinking == false) {
+  if(isBlinking == false) {    
+    DEBUG_PRINTLN("Starting blink");
     matrix.blinkRate(BLINK_RATE);
     isBlinking = true;
   }
@@ -444,6 +490,7 @@ void start_blink() {
 
 void stop_blink() {
   if(isBlinking) {
+    DEBUG_PRINTLN("Stopping blink");
     matrix.blinkRate(0);
     isBlinking = false;
   }
