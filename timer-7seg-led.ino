@@ -16,12 +16,16 @@
   #define DEBUG_DELAY(x) delay(x)
   #define DEBUG_FLUSH() Serial.flush()
   #define DEBUG_END() Serial.end()
+  #define DEBUG_WAIT_FOR_SERIAL() while(!Serial) delay(10);
 #else
   #define DEBUG_SERIAL_BEGIN(x)
   #define DEBUG_PRINT(x)
-  #define DEBUG_PRINTF(...)
+  #define DEBUG_PRINTF(args...)
   #define DEBUG_PRINTLN(x)
   #define DEBUG_DELAY(x)
+  #define DEBUG_FLUSH()
+  #define DEBUG_END()
+  #define DEBUG_WAIT_FOR_SERIAL()
 #endif
 
 using namespace ace_button;
@@ -83,6 +87,14 @@ class TonePlayer {
     }
 };
 
+enum State {
+  Idle,
+  StopwatchRunning,
+  TimerRunning,
+};
+
+volatile State CurrentState = Idle;
+
 ////////////
 // SETTINGS
 ////////////
@@ -125,8 +137,6 @@ const bool SHOULD_BLINK_WHEN_DONE = true; // Flag determinig if the display shou
 // MEMBERS
 volatile int timer = 0;                // The all-mighty timer (value in seconds) 
 bool isBlinking = false;      // Flag tracking if we are already blinking
-volatile bool timerRunning = false;    // Flag determining if there is currently a timer running
-volatile bool stopwatchRunning = false;// Flag determining if there is a stopwatch running
 bool paused = false;          // Flag determining if the timer is set but paused
 int prevTicks = 1000;         // Tick tracker for the tone player to piggy back on actionTimer's ticks
 bool screenEnabled = true;
@@ -146,9 +156,7 @@ void setup() {
   // Wait for serial connection if we're in debug mode.
   // This prevents us from missing any serial information when debugging but will halt the microcontroller
   // if no USB cable or serial connection is available
-  #ifdef DEBUG
-  while(!Serial) delay(10);
-  #endif
+  DEBUG_WAIT_FOR_SERIAL();
   DEBUG_PRINTLN("Setup started");
 
   DEBUG_PRINTLN("Setting up LED screen");
@@ -171,6 +179,13 @@ void setup() {
   // Disable the screen because attaching interrupts runs the 
   // callback immediately which can render weird artifacts on the screen
   screenEnabled = false;
+
+  // Clear interrupt flags on button action pins before assigning them to prevent accidental calling of callback when attaching
+  /*EIC->INTFLAG.reg |= 1 << PAUSE_BUTTON_PIN;
+  EIC->INTFLAG.reg |= 1 << ADD_TIME_BUTTON_PIN;
+  EIC->INTFLAG.reg |= 1 << START_TIMER1_PIN;
+  EIC->INTFLAG.reg |= 1 << START_TIMER2_PIN;
+  EIC->INTFLAG.reg |= 1 << STOP_BUTTON_PIN;*/
   LowPower.attachInterruptWakeup(PAUSE_BUTTON_PIN, pauseButtonAction, CHANGE);
   LowPower.attachInterruptWakeup(ADD_TIME_BUTTON_PIN, addTimeButtonAction, CHANGE);
   LowPower.attachInterruptWakeup(START_TIMER1_PIN, startTimerOneButtonAction, CHANGE);
@@ -204,7 +219,7 @@ void setup() {
 
   // Spin two times to indicate to the user that setup is complete 
   // and the device is available for use
-  delay(100);
+  //delay(100);
   // 1 rotation (in ms) = speed * 14 * numSpins
   // 150 * 14 * 2 = 4200 (4.2 sec)
   write_spin(2, 150);
@@ -225,14 +240,23 @@ void loop() {
   tonePlayer.tick(prevTicks - ticks);
   prevTicks = ticks;
 
-  if(timerRunning == false && stopwatchRunning == false && tonePlayer.isPlaying() == false) {
-    DEBUG_PRINTLN("Going to sleep");
-    DEBUG_FLUSH();
-    DEBUG_END(); 
-    LowPower.sleep();
-    DEBUG_SERIAL_BEGIN(9600);
-    DEBUG_DELAY(1000);
-    DEBUG_PRINTLN("Waking up");
+  switch(CurrentState) {
+    case(Idle):
+      if(tonePlayer.isPlaying() == false) {
+        /*DEBUG_PRINTLN("Going to sleep");
+        DEBUG_FLUSH();
+        DEBUG_END(); 
+        LowPower.sleep();
+        DEBUG_SERIAL_BEGIN(9600);
+        DEBUG_WAIT_FOR_SERIAL();
+        DEBUG_PRINTLN("Waking up");*/
+      }
+      break;
+    case(TimerRunning):
+    case(StopwatchRunning):
+    default:
+      // Do nothing in every other case
+      break;
   }
 }
 
@@ -243,35 +267,43 @@ void stopButtonAction() {
 
 void pauseButtonAction() {
   DEBUG_PRINTLN("Pause button pressed");
-  if(stopwatchRunning || timerRunning) {
-    pause_or_play();
-  } else {
+  if(CurrentState == Idle) {
+    // If nothing else is happening, the Start/Pause button starts a stopwatch
     start_stopwatch();
+  } else {
+    // Otherwise, the button pauses or plays the current timer or stopwatch
+    pause_or_play();
   }
 }
 
 void addTimeButtonAction() {
   DEBUG_PRINTLN("Add Time button pressed");
-  if(stopwatchRunning) return;
+
+  // Return early if a stopwatch is currently running to prevent accidental overwriting of the stopwatch with a timer
+  if(CurrentState == StopwatchRunning) return;
   start_timer(timer + ADD_TIME_SECONDS);
 }
 
 void startTimerOneButtonAction() {
-  DEBUG_PRINTLN("Timer 1 button pressed");      
-  if(stopwatchRunning) return;
+  DEBUG_PRINTLN("Timer 1 button pressed");
+
+  // Return early if a stopwatch is currently running to prevent accidental overwriting of the stopwatch with a timer
+  if(CurrentState == StopwatchRunning) return;
   start_timer(TIMER1_SECONDS);
 }
 
 void startTimerTwoButtonAction() {
   DEBUG_PRINTLN("Timer 2 button pressed");
-  if(stopwatchRunning) return;
+
+  // Return early if a stopwatch is currently running to prevent accidental overwriting of the stopwatch with a timer
+  if(CurrentState == StopwatchRunning) return;
   start_timer(TIMER2_SECONDS);
 }
 
+
 void buttonHandler(AceButton* button, uint8_t eventType, uint8_t buttonState) {
-  // Exit early if the event isn't a keypress
-  if(eventType != AceButton::kEventPressed && eventType != AceButton::kEventLongPressed) { return; }
   if(eventType == AceButton::kEventPressed) {
+    DEBUG_PRINTLN("Button Pressed Event");
     switch (button->getPin()) {
       case PAUSE_BUTTON_PIN:
         pauseButtonAction();
@@ -286,43 +318,55 @@ void buttonHandler(AceButton* button, uint8_t eventType, uint8_t buttonState) {
         startTimerTwoButtonAction();
         break;
       case STOP_BUTTON_PIN:
-        if(timerRunning || stopwatchRunning) break;
+        // Do nothing if stop is "clicked" (not held) while a timer or stopwatch is running
+        // If the timer is idle (and possibly flashing 00:00 at the user), clicking stop will blank the display
+        if(CurrentState == StopwatchRunning || CurrentState == TimerRunning) break;
         stopButtonAction();
         break;
     }
   } else if(eventType == AceButton::kEventLongPressed) {
+    DEBUG_PRINTLN("Button Long Pressed Event");
     switch (button->getPin()) {
       case STOP_BUTTON_PIN:
+        // Require a long press to stop to avoid accidental stopping of timers and stopwatches
         stopButtonAction();
         break;
     }
   }
 }
 
+// Attempts to start a timer for timerSeconds
+// Will not start a timer if a stopwatch is running
+// Returns true on successful timer start
+// Returns false otherwise
 void start_timer(int timerSeconds) {
   DEBUG_PRINTF("Starting timer for %d seconds", timerSeconds);
   timer = timerSeconds;
 
+  // If a blink or tone was playing, stop it before we start the new timer
   stop_blink();
   tonePlayer.stop();
 
-  // If the timer was stopped, start it again
-  if(timerRunning == false) {
-    timerRunning = true;
+  // If the timer was not running, start it
+  if(CurrentState != TimerRunning) {
+    CurrentState = TimerRunning;
     matrix.drawColon(true);
   }
   write_timer();
 }
 
 void start_stopwatch() {
-  if(stopwatchRunning == false) {
-    DEBUG_PRINTLN("Starting stopwatch");
+  DEBUG_PRINTLN("Starting stopwatch");  
+  timer = 0;
 
-    stop_blink();
+  // If a blink or tone was playing, stop it before we start the stopwatch
+  stop_blink();
+  tonePlayer.stop();
 
-    timer = 0;
-    stopwatchRunning = true;
+  if(CurrentState != StopwatchRunning) {
+    CurrentState = StopwatchRunning;
     matrix.drawColon(true);
+
   }
   write_timer();
 }
@@ -330,8 +374,7 @@ void start_stopwatch() {
 void stop_timer() {
   DEBUG_PRINTLN("Stopping timer/stopwatch");
   timer = 0;
-  timerRunning = false;
-  stopwatchRunning = false;
+  CurrentState = Idle;
   paused = false;
   stop_blink();
   write_blank();
@@ -350,35 +393,42 @@ void pause_or_play() {
 
 // Do some checks, subtract 1 second from our timer, and then display it
 bool dec_timer(void *) {
-  // Exit early if the alarm is not running (paused or done)
-  if(timerRunning == false && stopwatchRunning == false || paused) return true;
+  // Don't change the timer if it is currently paused
+  if(paused) return true;
 
-  if(timerRunning) {
-    if(timer == 0) {
-      // Exit early if timer has finished
-      tonePlayer.activate();
-      if(SHOULD_BLINK_WHEN_DONE) {
-        start_blink();
-      } else {
-        stop_blink();
-        write_blank();
-      }
-
-      timerRunning = false;
+  switch(CurrentState) {
+    case(Idle):
+      // If idle, bail early as we have nothing to do here
       return true;
-    }
-    timer -= 1; // dec timer
+    case(TimerRunning):
+      if(timer == 0) {
+        // Exit early if timer has finished
+        CurrentState = Idle;
+        // Play a tone to indicate to the user the timer has finished
+        tonePlayer.activate();
+
+        if(SHOULD_BLINK_WHEN_DONE) {
+          start_blink();
+        } else {
+          stop_blink();
+          write_blank();
+        }
+
+        return true;
+      }
+      timer -= 1; // dec timer
         
-    // Start blinking if only BLINK_TIME seconds are left
-    if(SHOULD_BLINK && timer < BLINK_TIME) {
-        start_blink();
-    }
-  } else if(stopwatchRunning) {
-    timer += 1;
+      // Start blinking if only BLINK_TIME seconds are left
+      if(SHOULD_BLINK && timer < BLINK_TIME) {
+          start_blink();
+      }
+      break;
+    case(StopwatchRunning):
+      timer += 1;
+      break;    
   }
   
   write_timer();
-  return true;
 }
 
 ////
